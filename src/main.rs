@@ -4,7 +4,7 @@ use leptos::prelude::*;
 fn setup() {
     App::new()
         .add_plugins(DefaultPlugins
-            /*.set(
+            .set(
                 WindowPlugin {
                     primary_window: Some(
                         Window {
@@ -15,7 +15,7 @@ fn setup() {
                     ),
                     ..default()
                 }
-            )*/
+            )
             .set(
                 AssetPlugin {
                     meta_check: bevy::asset::AssetMetaCheck::Never,
@@ -36,7 +36,7 @@ fn App() -> impl IntoView {
 }
 
 fn main() {
-    //mount_to_body(App);
+    mount_to_body(App);
     setup();
 }
 
@@ -175,7 +175,7 @@ fn audio_button(
                 commands.spawn((AudioPlayer::new(audio.cell_click.clone()), PlaybackSettings::DESPAWN));
             }
             Interaction::Hovered => {
-                *bgcolor = BackgroundColor(Color::srgb(0., 1., 1.));
+                *bgcolor = BackgroundColor(Color::srgb(0., 1., 0.));
             }
             Interaction::None => {
                 *bgcolor = BackgroundColor(Color::srgb(1., 0., 1.));

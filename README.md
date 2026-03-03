@@ -1,1 +1,1 @@
-leptos上でのbevyによるAudio再生test
+leptos(canvas)上でのbevy(0.18.0)によるAudio再生test
