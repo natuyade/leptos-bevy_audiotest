@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 leptos = "0.8.17"
-bevy = { version = "0.18.0", features = ["wav","mp3"] }
+bevy = { version = "0.18.0", features = ["vorbis","wav","mp3"] }
