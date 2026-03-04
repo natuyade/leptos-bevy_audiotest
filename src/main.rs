@@ -4,7 +4,7 @@ use leptos::prelude::*;
 fn setup() {
     App::new()
         .add_plugins(DefaultPlugins
-            /*.set(
+            .set(
                 WindowPlugin {
                     primary_window: Some(
                         Window {
@@ -15,7 +15,7 @@ fn setup() {
                     ),
                     ..default()
                 }
-            )*/
+            )
             .set(
                 AssetPlugin {
                     meta_check: bevy::asset::AssetMetaCheck::Never,
@@ -25,7 +25,8 @@ fn setup() {
         )
         .init_resource::<BGMState>()
         .init_resource::<AudioLoadState>()
-        .init_resource::<SoundsFolder>()
+        //.init_resource::<SoundsFolder>()
+        .init_resource::<SoundLoader>()
         .add_systems(Startup, setup_title)
         .add_systems(Update, (
             audio_button,
@@ -36,24 +37,41 @@ fn setup() {
 
 #[component]
 fn App() -> impl IntoView {
+    let start = std::sync::Once::new();
     view!{
-        <canvas id="bevy_audio" style="width:auto;height:100vh;"/>
+        <button
+            on:click = move|_| {
+                start.call_once(|| setup() )
+            }
+        >
+        "START"
+        </button>
+        <canvas
+        id="bevy_audio"
+        style="width:auto;height:100vh;"
+        />
     }
 }
 
 fn main() {
-    //mount_to_body(App);
-    setup();
+    mount_to_body(App);
 }
 
 #[derive(Resource, Default)]
 struct AudioLoadState {
-    sound_loaded: bool,
+    sound_loading: bool,
     ui_updated: bool,
 }
 
+//#[derive(Resource, Default)]
+//struct SoundsFolder (Handle<bevy::asset::LoadedFolder>);
+
 #[derive(Resource, Default)]
-struct SoundsFolder (Handle<bevy::asset::LoadedFolder>);
+struct SoundLoader {
+    bgm: Handle<AudioSource>,
+    start: Handle<AudioSource>,
+    open_cell: Handle<AudioSource>,
+}
 
 #[derive(Resource, Default)]
 struct BGMState {
@@ -62,13 +80,13 @@ struct BGMState {
 
 #[derive(Component)]
 enum ButtonType {
-    SoundLoader,
+    Loader,
     Bgm,
     OpenCell,
     Start,
 }
 
-use crate::ButtonType::{Bgm, OpenCell, SoundLoader, Start};
+use crate::ButtonType::{Bgm, OpenCell, Loader, Start};
 fn setup_title( mut commands: Commands ) {
     commands.spawn(Camera2d);
 
@@ -83,7 +101,7 @@ fn setup_title( mut commands: Commands ) {
         },
         BackgroundColor (Color::srgb(0.,0.,0.)),
         Button,
-        SoundLoader,
+        Loader,
         children![
             Text::new("Press to load Sounds")
         ]
@@ -146,7 +164,8 @@ use bevy::ecs::query::With;
 fn audio_button(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut sounds_folder: ResMut<SoundsFolder>,
+    //mut sounds_folder: ResMut<SoundsFolder>,
+    mut sound_loader: ResMut<SoundLoader>,
     mut audio_load_state: ResMut<AudioLoadState>,
     mut bgmstate: ResMut<BGMState>,
     mut sounds_query: Query<(Entity, &Interaction, &ButtonType, &mut BackgroundColor), (With<Button>, Changed<Interaction>)>,
@@ -160,11 +179,11 @@ fn audio_button(
             Interaction::Pressed => {
                 match button {
 
-                    SoundLoader => {
-                        if audio_load_state.sound_loaded == true {
+                    Loader => {
+                        if audio_load_state.sound_loading == true {
                             continue;
                         }
-                        audio_load_state.sound_loaded = true;
+                        audio_load_state.sound_loading = true;
                         if let Ok(children) = children_query.get(entity) {
                             for child in children.iter() {
                                 if let Ok(mut text) = text_query.get_mut(child) {
@@ -172,11 +191,19 @@ fn audio_button(
                                 }
                             }
                         }
-                        sounds_folder.0 = asset_server.load_folder("sounds");
+                        sound_loader.bgm = asset_server.load("sounds/bgm.ogg");
+                        sound_loader.start = asset_server.load("sounds/start.mp3");
+                        sound_loader.open_cell = asset_server.load("sounds/open_cell.wav");
+                        //　HttpWasmAssetReaderにdirectoryを読める実装がされてないのでload_folderは使用不可
+                        //sounds_folder.0 = asset_server.load_folder("sounds");
+
                     }
 
                     Bgm => {
-                        if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                        //if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                        //    continue
+                        //}
+                        if audio_load_state.ui_updated == false {
                             continue
                         }
                         match bgmstate.entity {
@@ -185,31 +212,37 @@ fn audio_button(
                                 bgmstate.entity = None;
                             }
                             None => {
-                                let entity = commands.spawn((AudioPlayer::new(asset_server.load("sounds/bgm.ogg")), PlaybackSettings::LOOP)).id();
+                                let entity = commands.spawn((AudioPlayer::new(sound_loader.bgm.clone()), PlaybackSettings::LOOP)).id();
                                 bgmstate.entity = Some(entity);
                             }
                         }
                     }
 
                     Start => {
-                        if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                        //if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                        //    continue
+                        //}
+                        if audio_load_state.ui_updated == false {
                             continue
                         }
-                        commands.spawn((AudioPlayer::new(asset_server.load("sounds/start.mp3")), PlaybackSettings::DESPAWN));
+                        commands.spawn((AudioPlayer::new(sound_loader.start.clone()), PlaybackSettings::DESPAWN));
                     }
 
                     OpenCell => {
-                        if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                        //if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                        //    continue
+                        //}
+                        if audio_load_state.ui_updated == false {
                             continue
                         }
-                        commands.spawn((AudioPlayer::new(asset_server.load("sounds/open_cell.wav")), PlaybackSettings::DESPAWN));
+                        commands.spawn((AudioPlayer::new(sound_loader.open_cell.clone()), PlaybackSettings::DESPAWN));
                     }
                 }
             }
 
             Interaction::Hovered => {
                 match button {
-                    SoundLoader => {
+                    Loader => {
                         if audio_load_state.ui_updated == true {
                             continue
                         }
@@ -229,7 +262,7 @@ fn audio_button(
 
             Interaction::None => {
                 match button {
-                    SoundLoader => {
+                    Loader => {
                         if audio_load_state.ui_updated == true {
                             continue
                         }
@@ -252,16 +285,22 @@ fn audio_button(
 
 fn load_state(
     asset_server: Res<AssetServer>,
-    sounds_folder: Res<SoundsFolder>,
+    //sounds_folder: Res<SoundsFolder>,
+    sound_loader: Res<SoundLoader>,
     mut audio_load_state: ResMut<AudioLoadState>,
     mut sounds_query: Query<(Entity, &ButtonType, &mut BackgroundColor), With<Button>>,
     children_query: Query<&bevy::ecs::hierarchy::Children>,
     mut text_query: Query<&mut Text>,
 ) {
     if audio_load_state.ui_updated == false {
-        if asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) && audio_load_state.sound_loaded == true {
+        if audio_load_state.sound_loading == true
+            && asset_server.is_loaded(&sound_loader.bgm)
+            && asset_server.is_loaded(&sound_loader.start)
+            && asset_server.is_loaded(&sound_loader.open_cell) {
+
+            //if asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) && audio_load_state.sound_loaded == true {
             for (entity, button, mut bgcolor) in &mut sounds_query {
-                if matches!(button, SoundLoader) {
+                if matches!(button, Loader) {
                     if let Ok(children) = children_query.get(entity) {
                         for child in children.iter() {
                             if let Ok(mut text) = text_query.get_mut(child) {
@@ -273,6 +312,7 @@ fn load_state(
                     }
                 }
             }
+            //}
         }
     }
 }
