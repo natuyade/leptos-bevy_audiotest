@@ -4,7 +4,7 @@ use leptos::prelude::*;
 fn setup() {
     App::new()
         .add_plugins(DefaultPlugins
-            .set(
+            /*.set(
                 WindowPlugin {
                     primary_window: Some(
                         Window {
@@ -15,7 +15,7 @@ fn setup() {
                     ),
                     ..default()
                 }
-            )
+            )*/
             .set(
                 AssetPlugin {
                     meta_check: bevy::asset::AssetMetaCheck::Never,
@@ -23,8 +23,14 @@ fn setup() {
                 }
             )
         )
+        .init_resource::<BGMState>()
+        .init_resource::<AudioLoadState>()
+        .init_resource::<SoundsFolder>()
         .add_systems(Startup, setup_title)
-        .add_systems(Update, audio_button)
+        .add_systems(Update, (
+            audio_button,
+            load_state,
+            ))
         .run();
 }
 
@@ -36,41 +42,52 @@ fn App() -> impl IntoView {
 }
 
 fn main() {
-    mount_to_body(App);
+    //mount_to_body(App);
     setup();
 }
 
-#[derive(Resource)]
-struct GameAudio {
-    bgm: Handle<AudioSource>,
-    cell_click: Handle<AudioSource>,
-    start: Handle<AudioSource>,
-    failed: Handle<AudioSource>,
-    setting: Handle<AudioSource>
+#[derive(Resource, Default)]
+struct AudioLoadState {
+    sound_loaded: bool,
+    ui_updated: bool,
+}
+
+#[derive(Resource, Default)]
+struct SoundsFolder (Handle<bevy::asset::LoadedFolder>);
+
+#[derive(Resource, Default)]
+struct BGMState {
+    entity: Option<Entity>,
 }
 
 #[derive(Component)]
-struct PlayingBGM (bool);
+enum ButtonType {
+    SoundLoader,
+    Bgm,
+    OpenCell,
+    Start,
+}
 
-#[derive(Component)]
-struct BGM;
-
-#[derive(Component)]
-struct Cell;
-
-#[derive(Component)]
-struct StartButton;
-
-fn setup_title( mut commands: Commands, asset_server: Res<AssetServer> ) {
+use crate::ButtonType::{Bgm, OpenCell, SoundLoader, Start};
+fn setup_title( mut commands: Commands ) {
     commands.spawn(Camera2d);
 
-    commands.insert_resource(GameAudio{
-        bgm: asset_server.load("sounds/bgm.ogg"),
-        cell_click: asset_server.load("sounds/open_cell.wav"),
-        start: asset_server.load("sounds/start.mp3"),
-        failed: asset_server.load("sounds/failed.wav"),
-        setting: asset_server.load("sounds/setting_button.wav"),
-    });
+    commands.spawn((
+        Node {
+            position_type: PositionType::Relative,
+            top: Val::Percent(72.),
+            left: Val::Percent(50.),
+            width: Val::Px(128.),
+            height: Val::Px(64.),
+            ..default()
+        },
+        BackgroundColor (Color::srgb(0.,0.,0.)),
+        Button,
+        SoundLoader,
+        children![
+            Text::new("Press to load Sounds")
+        ]
+        ));
 
     commands.spawn((
         Node {
@@ -83,7 +100,7 @@ fn setup_title( mut commands: Commands, asset_server: Res<AssetServer> ) {
         },
         BackgroundColor (Color::srgb(0.,0.,1.)),
         Button,
-        PlayingBGM { 0: false },
+        Bgm,
         children![
             Text::new("ogg")
         ]
@@ -100,7 +117,7 @@ fn setup_title( mut commands: Commands, asset_server: Res<AssetServer> ) {
         },
         BackgroundColor (Color::srgb(1.,0.,1.)),
         Button,
-        Cell,
+        OpenCell,
         children![
             Text::new("wav")
         ]
@@ -117,7 +134,7 @@ fn setup_title( mut commands: Commands, asset_server: Res<AssetServer> ) {
         },
         BackgroundColor (Color::srgb(0.,1.,1.)),
         Button,
-        StartButton,
+        Start,
         children![
             Text::new("mp3")
         ]
@@ -127,75 +144,134 @@ fn setup_title( mut commands: Commands, asset_server: Res<AssetServer> ) {
 use bevy::ecs::query::With;
 
 fn audio_button(
-    audio: Res<GameAudio>,
-    audio_assets: Res<Assets<AudioSource>>,
     mut commands: Commands,
-    mut bgm_query: Query<(&Interaction, &mut BackgroundColor, &mut PlayingBGM), (With<PlayingBGM>, Without<Cell>, Without<StartButton>, Changed<Interaction>)>,
-    mut cell_query: Query<(&Interaction, &mut BackgroundColor),(With<Cell>, Without<PlayingBGM>, Without<StartButton>, Changed<Interaction>)>,
-    mut start_query: Query<(&Interaction, &mut BackgroundColor),(With<StartButton>, Without<PlayingBGM>, Without<Cell>, Changed<Interaction>)>,
-    bgmentity: Query<Entity, With<BGM>>
+    asset_server: Res<AssetServer>,
+    mut sounds_folder: ResMut<SoundsFolder>,
+    mut audio_load_state: ResMut<AudioLoadState>,
+    mut bgmstate: ResMut<BGMState>,
+    mut sounds_query: Query<(Entity, &Interaction, &ButtonType, &mut BackgroundColor), (With<Button>, Changed<Interaction>)>,
+    children_query: Query<&bevy::ecs::hierarchy::Children>,
+    mut text_query: Query<&mut Text>,
+
 ) {
-    for (ints, mut bgcolor, mut playing) in &mut bgm_query {
-
-            match *ints {
-                Interaction::Pressed => {
-                    if audio_assets.get(&audio.bgm).is_none() {
-                        *playing = PlayingBGM { 0: false };
-                        return;
-                    }
-                    match playing.0 {
-                        true => {
-                            for entity in &bgmentity {
-                                commands.entity(entity).despawn();
-                            }
-                            *playing = PlayingBGM { 0: false };
-                        }
-                        false => {
-                            commands.spawn((AudioPlayer::new(audio.bgm.clone()), PlaybackSettings::LOOP, BGM));
-                            *playing = PlayingBGM { 0: true };
-                        }
-                    }
-                }
-                Interaction::Hovered => {
-                    *bgcolor = BackgroundColor(Color::srgb(1., 0., 0.));
-                }
-                Interaction::None => {
-                    *bgcolor = BackgroundColor(Color::srgb(0., 0., 1.));
-                }
-            }
-
-    }
-
-    for (ints, mut bgcolor) in &mut cell_query {
+    for (entity, ints, button, mut bgcolor) in &mut sounds_query {
         match *ints {
+            // SoundLoader
             Interaction::Pressed => {
-                if audio_assets.get(&audio.cell_click).is_none() {
-                    return;
+                match button {
+
+                    SoundLoader => {
+                        if audio_load_state.sound_loaded == true {
+                            continue;
+                        }
+                        audio_load_state.sound_loaded = true;
+                        if let Ok(children) = children_query.get(entity) {
+                            for child in children.iter() {
+                                if let Ok(mut text) = text_query.get_mut(child) {
+                                    **text = "Loading".to_string();
+                                }
+                            }
+                        }
+                        sounds_folder.0 = asset_server.load_folder("sounds");
+                    }
+
+                    Bgm => {
+                        if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                            continue
+                        }
+                        match bgmstate.entity {
+                            Some(entity) => {
+                                commands.entity(entity).despawn();
+                                bgmstate.entity = None;
+                            }
+                            None => {
+                                let entity = commands.spawn((AudioPlayer::new(asset_server.load("sounds/bgm.ogg")), PlaybackSettings::LOOP)).id();
+                                bgmstate.entity = Some(entity);
+                            }
+                        }
+                    }
+
+                    Start => {
+                        if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                            continue
+                        }
+                        commands.spawn((AudioPlayer::new(asset_server.load("sounds/start.mp3")), PlaybackSettings::DESPAWN));
+                    }
+
+                    OpenCell => {
+                        if !asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) {
+                            continue
+                        }
+                        commands.spawn((AudioPlayer::new(asset_server.load("sounds/open_cell.wav")), PlaybackSettings::DESPAWN));
+                    }
                 }
-                commands.spawn((AudioPlayer::new(audio.cell_click.clone()), PlaybackSettings::DESPAWN));
             }
+
             Interaction::Hovered => {
-                *bgcolor = BackgroundColor(Color::srgb(0., 1., 0.));
+                match button {
+                    SoundLoader => {
+                        if audio_load_state.ui_updated == true {
+                            continue
+                        }
+                        *bgcolor = BackgroundColor(Color::srgb(0.3, 0.3, 0.3));
+                    }
+                    Bgm => {
+                        *bgcolor = BackgroundColor(Color::srgb(1., 0., 0.));
+                    }
+                    Start => {
+                        *bgcolor = BackgroundColor(Color::srgb(0., 1., 1.));
+                    }
+                    OpenCell => {
+                        *bgcolor = BackgroundColor(Color::srgb(0., 1., 0.));
+                    }
+                }
             }
+
             Interaction::None => {
-                *bgcolor = BackgroundColor(Color::srgb(1., 0., 1.));
+                match button {
+                    SoundLoader => {
+                        if audio_load_state.ui_updated == true {
+                            continue
+                        }
+                        *bgcolor = BackgroundColor(Color::srgb(0., 0., 0.));
+                    }
+                    Bgm => {
+                        *bgcolor = BackgroundColor(Color::srgb(0., 0., 1.));
+                    }
+                    Start => {
+                        *bgcolor = BackgroundColor(Color::srgb(1., 1., 0.));
+                    }
+                    OpenCell => {
+                        *bgcolor = BackgroundColor(Color::srgb(1., 0., 1.));
+                    }
+                }
             }
         }
     }
+}
 
-    for (ints, mut bgcolor) in &mut start_query {
-        match *ints {
-            Interaction::Pressed => {
-                if audio_assets.get(&audio.cell_click).is_none() {
-                    return;
+fn load_state(
+    asset_server: Res<AssetServer>,
+    sounds_folder: Res<SoundsFolder>,
+    mut audio_load_state: ResMut<AudioLoadState>,
+    mut sounds_query: Query<(Entity, &ButtonType, &mut BackgroundColor), With<Button>>,
+    children_query: Query<&bevy::ecs::hierarchy::Children>,
+    mut text_query: Query<&mut Text>,
+) {
+    if audio_load_state.ui_updated == false {
+        if asset_server.is_loaded_with_dependencies(sounds_folder.0.id()) && audio_load_state.sound_loaded == true {
+            for (entity, button, mut bgcolor) in &mut sounds_query {
+                if matches!(button, SoundLoader) {
+                    if let Ok(children) = children_query.get(entity) {
+                        for child in children.iter() {
+                            if let Ok(mut text) = text_query.get_mut(child) {
+                                **text = "Loaded".to_string();
+                                *bgcolor = BackgroundColor(Color::srgb(0.,1.,0.));
+                                audio_load_state.ui_updated = true;
+                            }
+                        }
+                    }
                 }
-                commands.spawn((AudioPlayer::new(audio.start.clone()), PlaybackSettings::DESPAWN));
-            }
-            Interaction::Hovered => {
-                *bgcolor = BackgroundColor(Color::srgb(1., 1., 0.));
-            }
-            Interaction::None => {
-                *bgcolor = BackgroundColor(Color::srgb(0., 1., 1.));
             }
         }
     }
