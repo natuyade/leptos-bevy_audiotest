@@ -37,6 +37,8 @@ fn setup() {
 
 #[component]
 fn App() -> impl IntoView {
+    // Startボタンでaudioctx was not allowedを回避, bevyが読み込まれる前にそのページ内でInteractionがないと許可されないので
+    // そもそもの判定をbevy起動ボタンで取るようにした。
     let start = std::sync::Once::new();
     view!{
         <button
